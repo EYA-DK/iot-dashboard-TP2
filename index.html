@@ -1,0 +1,836 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 Parking Barrier Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #1a1a2e;
+      --surface:     #16213e;
+      --surface2:    #0f3460;
+      --accent:      #e94560;
+      --accent2:     #4ecdc4;
+      --text:        #e0e0f0;
+      --text-muted:  #8888aa;
+      --green:       #2ecc71;
+      --orange:      #f39c12;
+      --red:         #e74c3c;
+      --yellow:      #ffe66d;
+      --radius:      12px;
+      --shadow:      0 4px 24px rgba(0,0,0,0.45);
+      --transition:  0.3s ease;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    /* ── Layout Wrapper ───────────────────────────────────────────── */
+    .dashboard {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 24px 20px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .header-left h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--text);
+    }
+
+    .header-left h1 span { color: var(--accent); }
+
+    .header-left p {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    /* ── Status Indicator ─────────────────────────────────────────── */
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--surface);
+      border: 1px solid var(--surface2);
+      border-radius: 20px;
+      padding: 6px 14px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: background var(--transition);
+      flex-shrink: 0;
+    }
+
+    .status-dot.online  { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .status-dot.offline { background: var(--red);   box-shadow: 0 0 8px var(--red); }
+
+    .last-updated {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+    }
+
+    /* ── Config Panel ─────────────────────────────────────────────── */
+    .config-panel {
+      background: var(--surface);
+      border: 1px solid var(--surface2);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .config-panel label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      flex: 1;
+      min-width: 180px;
+    }
+
+    .config-panel input {
+      background: var(--bg);
+      border: 1px solid var(--surface2);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.88rem;
+      padding: 8px 12px;
+      outline: none;
+      transition: border-color var(--transition);
+      width: 100%;
+    }
+
+    .config-panel input:focus { border-color: var(--accent2); }
+
+    .config-panel input::placeholder { color: var(--text-muted); }
+
+    .btn-apply {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 22px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity var(--transition), transform 0.1s;
+      align-self: flex-end;
+      white-space: nowrap;
+    }
+
+    .btn-apply:hover  { opacity: 0.85; }
+    .btn-apply:active { transform: scale(0.97); }
+
+    /* ── Error Banner ─────────────────────────────────────────────── */
+    .error-banner {
+      display: none;
+      background: rgba(233,69,96,0.15);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius);
+      padding: 12px 18px;
+      font-size: 0.88rem;
+      color: #ff8fa3;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .error-banner.visible { display: flex; }
+    .error-banner .err-icon { font-size: 1.2rem; flex-shrink: 0; }
+
+    /* ── KPI Grid ─────────────────────────────────────────────────── */
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+    }
+
+    .kpi-card {
+      background: var(--surface);
+      border: 1px solid var(--surface2);
+      border-radius: var(--radius);
+      padding: 20px 22px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color var(--transition);
+    }
+
+    .kpi-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 3px;
+      background: var(--card-accent, var(--accent2));
+      border-radius: var(--radius) var(--radius) 0 0;
+    }
+
+    .kpi-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+    }
+
+    .kpi-value-row {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .kpi-icon { font-size: 1.5rem; line-height: 1; }
+
+    .kpi-value {
+      font-size: 2.2rem;
+      font-weight: 800;
+      line-height: 1;
+      transition: color var(--transition);
+      color: var(--text);
+    }
+
+    .kpi-unit {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .kpi-sub {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    /* Flash animation when value updates */
+    @keyframes flash-update {
+      0%   { background: rgba(255,230,109,0.22); }
+      100% { background: transparent; }
+    }
+
+    .kpi-card.flash { animation: flash-update 0.7s ease-out forwards; }
+
+    /* Distance colour states */
+    .dist-green  { color: var(--green)  !important; }
+    .dist-orange { color: var(--orange) !important; }
+    .dist-red    { color: var(--red)    !important; }
+
+    /* Barrier status pill */
+    .barrier-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 1rem;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+      transition: background var(--transition), color var(--transition);
+    }
+
+    .barrier-pill.open   { background: rgba(46,204,113,0.18); color: var(--green); }
+    .barrier-pill.closed { background: rgba(231,76,60,0.18);  color: var(--red); }
+
+    /* ── Charts Grid ──────────────────────────────────────────────── */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 20px;
+    }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--surface2);
+      border-radius: var(--radius);
+      padding: 20px 20px 16px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .chart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .chart-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .chart-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .chart-latest {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .chart-latest span {
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 180px;
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────── */
+    .footer {
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      padding-top: 8px;
+    }
+
+    /* ── Responsive ───────────────────────────────────────────────── */
+    @media (max-width: 600px) {
+      .header { flex-direction: column; align-items: flex-start; }
+      .kpi-value { font-size: 1.8rem; }
+    }
+  </style>
+</head>
+<body>
+<div class="dashboard">
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <div class="header">
+    <div class="header-left">
+      <h1>🚗 Parking Barrier <span>Dashboard</span></h1>
+      <p>ESP32 · DHT22 · HC-SR04 · Photoresistor · Servo — via ThingSpeak</p>
+    </div>
+    <div class="header-right">
+      <div class="status-badge">
+        <div class="status-dot" id="statusDot"></div>
+        <span id="statusText">En attente…</span>
+      </div>
+      <div class="last-updated" id="lastUpdated">Dernière mise à jour : —</div>
+    </div>
+  </div>
+
+  <!-- ── Config Panel ────────────────────────────────────────────── -->
+  <div class="config-panel">
+    <label>
+      Channel ID
+      <input type="text" id="cfgChannelId" placeholder="ex: 2345678" value="" />
+    </label>
+    <label>
+      Read API Key
+      <input type="text" id="cfgApiKey" placeholder="ex: ABCDEF1234567890" value="" />
+    </label>
+    <button class="btn-apply" onclick="applyConfig()">▶ Appliquer</button>
+  </div>
+
+  <!-- ── Error Banner ────────────────────────────────────────────── -->
+  <div class="error-banner" id="errorBanner">
+    <span class="err-icon">⚠️</span>
+    <span id="errorMsg">Impossible de récupérer les données ThingSpeak.</span>
+  </div>
+
+  <!-- ── KPI Cards ───────────────────────────────────────────────── -->
+  <div class="kpi-grid">
+
+    <!-- Temperature -->
+    <div class="kpi-card" id="card-temp" style="--card-accent:#ff6b6b">
+      <div class="kpi-label">Température</div>
+      <div class="kpi-value-row">
+        <span class="kpi-icon">🌡️</span>
+        <span class="kpi-value" id="kpiTemp">—</span>
+        <span class="kpi-unit">°C</span>
+      </div>
+      <div class="kpi-sub" id="kpiTempSub">En attente de données…</div>
+    </div>
+
+    <!-- Distance -->
+    <div class="kpi-card" id="card-dist" style="--card-accent:#4ecdc4">
+      <div class="kpi-label">Distance</div>
+      <div class="kpi-value-row">
+        <span class="kpi-icon">📡</span>
+        <span class="kpi-value" id="kpiDist">—</span>
+        <span class="kpi-unit">cm</span>
+      </div>
+      <div class="kpi-sub" id="kpiDistSub">En attente de données…</div>
+    </div>
+
+    <!-- Light -->
+    <div class="kpi-card" id="card-light" style="--card-accent:#ffe66d">
+      <div class="kpi-label">Luminosité</div>
+      <div class="kpi-value-row">
+        <span class="kpi-icon">💡</span>
+        <span class="kpi-value" id="kpiLight">—</span>
+        <span class="kpi-unit">%</span>
+      </div>
+      <div class="kpi-sub" id="kpiLightSub">En attente de données…</div>
+    </div>
+
+    <!-- Barrier -->
+    <div class="kpi-card" id="card-barrier" style="--card-accent:#a29bfe">
+      <div class="kpi-label">Barrière (Servo)</div>
+      <div class="kpi-value-row">
+        <span class="kpi-icon">🚧</span>
+        <span class="kpi-value" id="kpiServo">—</span>
+        <span class="kpi-unit">°</span>
+      </div>
+      <div id="barrierPill" class="barrier-pill closed" style="display:none">
+        <span id="barrierDot">●</span>
+        <span id="barrierLabel">FERMÉ</span>
+      </div>
+      <div class="kpi-sub" id="kpiBarrierSub">En attente de données…</div>
+    </div>
+
+  </div>
+
+  <!-- ── Charts ──────────────────────────────────────────────────── -->
+  <div class="charts-grid">
+
+    <!-- Temperature Chart -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">
+          <span class="chart-dot" style="background:#ff6b6b"></span>
+          Température (°C)
+        </div>
+        <div class="chart-latest">Dernier : <span id="chartTempLast">—</span></div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chartTemp"></canvas>
+      </div>
+    </div>
+
+    <!-- Distance Chart -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">
+          <span class="chart-dot" style="background:#4ecdc4"></span>
+          Distance (cm)
+        </div>
+        <div class="chart-latest">Dernier : <span id="chartDistLast">—</span></div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chartDist"></canvas>
+      </div>
+    </div>
+
+    <!-- Light Chart -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">
+          <span class="chart-dot" style="background:#ffe66d"></span>
+          Luminosité (%)
+        </div>
+        <div class="chart-latest">Dernier : <span id="chartLightLast">—</span></div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="chartLight"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ── Footer ─────────────────────────────────────────────────── -->
+  <div class="footer">
+    ESP32 Parking Barrier Dashboard · Données via ThingSpeak API · Rafraîchissement toutes les 15 s
+  </div>
+
+</div><!-- /.dashboard -->
+
+<script>
+  /* ================================================================
+     CONFIG — edit these defaults or use the input fields above
+  ================================================================ */
+  const CONFIG = {
+    channelId: '3412525',
+    apiKey:    'QKNR8IW49X5WO6YX',
+    results:   20,
+    refreshMs: 15000
+};
+
+
+const CHANNEL_ID = "3108063";
+const READ_API_KEY = "0WDM9UTT9TEFTBPB";
+const WRITE_API_KEY = "VAONUZ50NJ8RBCAF";
+
+
+  
+  const MAX_POINTS = 20;
+  let refreshTimer = null;
+
+  /* ── Chart.js global defaults ──────────────────────────────────── */
+  Chart.defaults.color          = '#8888aa';
+  Chart.defaults.borderColor    = 'rgba(255,255,255,0.06)';
+  Chart.defaults.font.family    = "'Segoe UI', system-ui, sans-serif";
+  Chart.defaults.font.size      = 11;
+
+  /* ── Chart factory ─────────────────────────────────────────────── */
+  function makeChart(canvasId, color, label, unit) {
+    const ctx = document.getElementById(canvasId).getContext('2d');
+    return new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: label,
+          data: [],
+          borderColor: color,
+          backgroundColor: hexToRgba(color, 0.12),
+          borderWidth: 2,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          pointBackgroundColor: color,
+          tension: 0.4,
+          fill: true
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: '#16213e',
+            borderColor: color,
+            borderWidth: 1,
+            titleColor: '#e0e0f0',
+            bodyColor: '#8888aa',
+            callbacks: {
+              label: ctx => ` ${ctx.parsed.y} ${unit}`
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { maxTicksLimit: 6, maxRotation: 0 }
+          },
+          y: {
+            grid: { color: 'rgba(255,255,255,0.05)' },
+            ticks: { maxTicksLimit: 5 }
+          }
+        }
+      }
+    });
+  }
+
+  /* ── Initialise charts ─────────────────────────────────────────── */
+  const chartTemp  = makeChart('chartTemp',  '#ff6b6b', 'Température', '°C');
+  const chartDist  = makeChart('chartDist',  '#4ecdc4', 'Distance',    'cm');
+  const chartLight = makeChart('chartLight', '#ffe66d', 'Luminosité',  '%');
+
+  /* ── Helpers ───────────────────────────────────────────────────── */
+  function hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1,3),16);
+    const g = parseInt(hex.slice(3,5),16);
+    const b = parseInt(hex.slice(5,7),16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function formatTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function formatDateTime(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleString('fr-FR');
+  }
+
+  function pushToChart(chart, label, value) {
+    chart.data.labels.push(label);
+    chart.data.datasets[0].data.push(value);
+    if (chart.data.labels.length > MAX_POINTS) {
+      chart.data.labels.shift();
+      chart.data.datasets[0].data.shift();
+    }
+    chart.update('none');
+  }
+
+  function flashCard(id) {
+    const el = document.getElementById(id);
+    el.classList.remove('flash');
+    void el.offsetWidth; // reflow to restart animation
+    el.classList.add('flash');
+  }
+
+  function setStatus(online) {
+    const dot  = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+    dot.className  = 'status-dot ' + (online ? 'online' : 'offline');
+    text.textContent = online ? 'En ligne' : 'Hors ligne';
+  }
+
+  function showError(msg) {
+    const banner = document.getElementById('errorBanner');
+    document.getElementById('errorMsg').textContent = msg;
+    banner.classList.add('visible');
+  }
+
+  function hideError() {
+    document.getElementById('errorBanner').classList.remove('visible');
+  }
+
+  /* ── DOM updaters ──────────────────────────────────────────────── */
+  function updateTemp(val) {
+    const el = document.getElementById('kpiTemp');
+    if (el.textContent !== String(val)) {
+      el.textContent = val !== null ? parseFloat(val).toFixed(1) : '—';
+      document.getElementById('kpiTempSub').textContent = 'Capteur DHT22';
+      document.getElementById('chartTempLast').textContent = val !== null ? parseFloat(val).toFixed(1) + ' °C' : '—';
+      flashCard('card-temp');
+    }
+  }
+
+  function updateDist(val) {
+    const el    = document.getElementById('kpiDist');
+    const sub   = document.getElementById('kpiDistSub');
+    const num   = val !== null ? parseFloat(val) : null;
+    const disp  = num !== null ? num.toFixed(0) : '—';
+
+    if (el.textContent !== disp) {
+      el.textContent = disp;
+      el.className   = 'kpi-value';
+
+      if (num !== null) {
+        if (num > 50) {
+          el.classList.add('dist-green');
+          sub.textContent = '✅ Zone libre (> 50 cm)';
+        } else if (num >= 20) {
+          el.classList.add('dist-orange');
+          sub.textContent = '⚠️ Véhicule proche (20–50 cm)';
+        } else {
+          el.classList.add('dist-red');
+          sub.textContent = '🛑 Obstacle détecté (< 20 cm)';
+        }
+      } else {
+        sub.textContent = 'Capteur HC-SR04';
+      }
+
+      document.getElementById('chartDistLast').textContent = num !== null ? num.toFixed(0) + ' cm' : '—';
+      flashCard('card-dist');
+    }
+  }
+
+  function updateLight(val) {
+    const el  = document.getElementById('kpiLight');
+    const num = val !== null ? parseFloat(val) : null;
+    const disp = num !== null ? num.toFixed(0) : '—';
+
+    if (el.textContent !== disp) {
+      el.textContent = disp;
+      const sub = document.getElementById('kpiLightSub');
+      if (num !== null) {
+        sub.textContent = num > 70 ? '☀️ Lumineux' : num > 30 ? '⛅ Modéré' : '🌙 Sombre';
+      } else {
+        sub.textContent = 'Photorésistance';
+      }
+      document.getElementById('chartLightLast').textContent = num !== null ? num.toFixed(0) + ' %' : '—';
+      flashCard('card-light');
+    }
+  }
+
+  function updateBarrier(val) {
+    const servoEl = document.getElementById('kpiServo');
+    const pill    = document.getElementById('barrierPill');
+    const label   = document.getElementById('barrierLabel');
+    const sub     = document.getElementById('kpiBarrierSub');
+    const num     = val !== null ? parseFloat(val) : null;
+    const disp    = num !== null ? num.toFixed(0) : '—';
+
+    if (servoEl.textContent !== disp) {
+      servoEl.textContent = disp;
+
+      if (num !== null) {
+        pill.style.display = 'inline-flex';
+        if (num > 90) {
+          pill.className = 'barrier-pill open';
+          label.textContent = 'OUVERT';
+          sub.textContent   = `Angle servo : ${num.toFixed(0)}° (> 90°)`;
+        } else {
+          pill.className = 'barrier-pill closed';
+          label.textContent = 'FERMÉ';
+          sub.textContent   = `Angle servo : ${num.toFixed(0)}° (≤ 90°)`;
+        }
+      } else {
+        pill.style.display = 'none';
+        sub.textContent = 'Potentiomètre → Servo';
+      }
+
+      flashCard('card-barrier');
+    }
+  }
+
+  /* ── Main fetch ────────────────────────────────────────────────── */
+  function fetchWithTimeout(url, timeoutMs = 8000) {
+    return Promise.race([
+      fetch(url),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout ' + timeoutMs + 'ms')), timeoutMs))
+    ]);
+  }
+
+  async function fetchData() {
+    const channelId = document.getElementById('cfgChannelId').value.trim() || CONFIG.channelId;
+    const apiKey    = document.getElementById('cfgApiKey').value.trim()    || CONFIG.apiKey;
+
+
+    if (!channelId || !apiKey) {
+      showError('Veuillez saisir un Channel ID et une Read API Key ThingSpeak valides.');
+      setStatus(false);
+      return;
+    }
+
+    const url = `https://api.thingspeak.com/channels/${channelId}/feeds.json?api_key=${apiKey}&results=${CONFIG.results}`;
+
+    try {
+      console.log('[ThingSpeak] fetch URL:', url);
+
+      // Retry 2 fois si échec réseau (ex: Failed to fetch / timeout)
+      let res;
+      let lastErr;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          res = await fetchWithTimeout(url, 8000);
+          if (!res.ok) throw new Error(`HTTP ${res.status} — ${res.statusText}`);
+          break;
+        } catch (e) {
+          lastErr = e;
+          console.warn(`[ThingSpeak] fetch attempt ${attempt} failed:`, e?.message || e);
+          if (attempt < 3) await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+
+      if (!res) throw lastErr || new Error('Fetch failed');
+
+      const data = await res.json();
+      console.log('[ThingSpeak] feeds payload:', data);
+      hideError();
+      setStatus(true);
+
+
+
+      const feeds = data.feeds || [];
+      if (feeds.length === 0) {
+        showError('Aucune donnée reçue. Vérifiez que le canal est actif et public (ou que la clé est correcte).');
+        return;
+      }
+
+      /* Rebuild charts with full history (up to MAX_POINTS) */
+      const slice = feeds.slice(-MAX_POINTS);
+
+      /* Reset chart data */
+      [chartTemp, chartDist, chartLight].forEach(c => {
+        c.data.labels = [];
+        c.data.datasets[0].data = [];
+      });
+
+      slice.forEach(feed => {
+        const t = formatTime(feed.created_at);
+        if (feed.field1 !== null && feed.field1 !== undefined && feed.field1 !== '')
+          pushToChart(chartTemp,  t, parseFloat(feed.field1));
+        if (feed.field2 !== null && feed.field2 !== undefined && feed.field2 !== '')
+          pushToChart(chartDist,  t, parseFloat(feed.field2));
+        if (feed.field3 !== null && feed.field3 !== undefined && feed.field3 !== '')
+          pushToChart(chartLight, t, parseFloat(feed.field3));
+      });
+
+      /* KPI cards — last feed entry */
+      const last = feeds[feeds.length - 1];
+      updateTemp(last.field1    !== '' ? last.field1    : null);
+      updateDist(last.field2    !== '' ? last.field2    : null);
+      updateLight(last.field3   !== '' ? last.field3    : null);
+      updateBarrier(last.field4 !== '' ? last.field4    : null);
+
+      /* Timestamp */
+      document.getElementById('lastUpdated').textContent =
+        'Dernière mise à jour : ' + formatDateTime(last.created_at);
+
+    } catch (err) {
+      setStatus(false);
+      showError(`Erreur de récupération : ${err.message}. Vérifiez le Channel ID, la clé API et votre connexion.`);
+      console.error('[ThingSpeak]', err);
+    }
+  }
+
+  /* ── Config apply ──────────────────────────────────────────────── */
+  function applyConfig() {
+    clearInterval(refreshTimer);
+    fetchData();
+    refreshTimer = setInterval(fetchData, CONFIG.refreshMs);
+  }
+
+  /* ── Bootstrap ─────────────────────────────────────────────────── */
+  (function init() {
+    /* Pre-fill inputs from CONFIG defaults if provided */
+    if (CONFIG.channelId) document.getElementById('cfgChannelId').value = CONFIG.channelId;
+    if (CONFIG.apiKey)    document.getElementById('cfgApiKey').value    = CONFIG.apiKey;
+
+    /* Start auto-refresh */
+    fetchData();
+    refreshTimer = setInterval(fetchData, CONFIG.refreshMs);
+  })();
+</script>
+</body>
+</html>
